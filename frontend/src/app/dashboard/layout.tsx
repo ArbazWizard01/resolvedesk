@@ -15,7 +15,7 @@ import {
   X,
   Search,
 } from "lucide-react";
-import { Dropdown, message } from "antd";
+import { Dropdown, App as AntdApp } from "antd";
 import { TOKEN_KEY, USER_KEY } from "@/lib/api";
 import { LogoMark } from "@/components/logo";
 import { NotificationBell } from "@/components/notification-bell";
@@ -32,6 +32,7 @@ export default function DashboardLayout({
   const [globalSearch, setGlobalSearch] = useState("");
   const pathname = usePathname();
   const router = useRouter();
+  const { message } = AntdApp.useApp();
 
   useEffect(() => {
     setMounted(true);

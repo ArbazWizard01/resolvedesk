@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, Drawer, Popover, Spin, message } from "antd";
+import { Badge, Button, Drawer, Popover, Spin, App } from "antd";
 import {
   Bell,
   CheckCheck,
@@ -43,6 +43,7 @@ function relativeTime(value: string) {
 
 export function NotificationBell() {
   const router = useRouter();
+  const { message } = App.useApp();
   const [feed, setFeed] = useState<Feed>({ items: [], unreadCount: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -277,9 +278,12 @@ export function NotificationBell() {
           placement="bottom"
           open={open}
           onClose={() => setOpen(false)}
-          height="min(85dvh, 720px)"
+          size="min(85dvh, 720px)"
           styles={{
-            content: { borderRadius: "20px 20px 0 0", overflow: "hidden" },
+            section: {
+              borderRadius: "20px 20px 0 0",
+              overflow: "hidden",
+            },
             body: {
               padding: "0 12px max(12px, env(safe-area-inset-bottom))",
               overflow: "hidden",

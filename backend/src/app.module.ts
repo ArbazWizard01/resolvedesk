@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { InsightsModule } from './insights/insights.module';
 
 @Module({
   imports: [
@@ -15,7 +16,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuthModule,
     TicketsModule,
     CommentsModule,
-    NotificationsModule
+    NotificationsModule,
+    InsightsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,17 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import {
-  Ticket,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Plus,
-  ArrowUpRight,
-} from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { Ticket, Clock, CheckCircle2, AlertCircle, Plus } from "lucide-react";
 import {
   Button,
-  Card,
+  Alert,
   Spin,
   Modal,
   Form,
@@ -25,48 +18,78 @@ import Link from "next/link";
 const { Option } = Select;
 const { TextArea } = Input;
 
+type Stats = {
+  total: number;
+  unassigned: number;
+  byStatus: Record<"OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED", number>;
+  byPriority: Record<"LOW" | "MEDIUM" | "HIGH", number>;
+};
+type NewTicket = {
+  title: string;
+  description: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+};
+
 export default function DashboardOverviewPage() {
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<NewTicket>();
   const { message } = AntdApp.useApp();
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const { data } = await API.get("/tickets/stats");
+      const { data } = await API.get<Stats>("/tickets/stats");
       setStats(data);
-    } catch (error) {
-      setStats({
-        total: 1,
-        unassigned: 1,
-        byStatus: { OPEN: 1, IN_PROGRESS: 0, RESOLVED: 0, CLOSED: 0 },
-        byPriority: { LOW: 0, MEDIUM: 0, HIGH: 1 },
-      });
+    } catch (error: unknown) {
+      setStats(null);
+      setError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleCreateTicket = async (values: any) => {
+  useEffect(() => {
+    void fetchStats();
+  }, [fetchStats]);
+
+  const completed =
+    (stats?.byStatus.RESOLVED ?? 0) + (stats?.byStatus.CLOSED ?? 0);
+  const completedShare =
+    stats && stats.total > 0
+      ? `${Math.round((completed / stats.total) * 1000) / 10}%`
+      : "—";
+
+  const handleCreateTicket = async (values: NewTicket) => {
     setSubmitting(true);
     try {
       await API.post("/tickets", values);
       message.success("Support ticket created successfully!");
-      setIsModalOpen(false);
       form.resetFields();
+      setIsModalOpen(false);
       fetchStats();
-    } catch (error: any) {
+    } catch (error: unknown) {
       message.error(getErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (error) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message="Could not load dashboard"
+        description={error}
+        action={<Button onClick={() => void fetchStats()}>Retry</Button>}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -85,10 +108,12 @@ export default function DashboardOverviewPage() {
             Support Dashboard
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Here is the live operational overview of your support desk.
+            All-time snapshot of the tickets you can access. Refresh to load
+            updates.
           </p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => void fetchStats()}>Refresh</Button>
           <Link href="/dashboard/tickets">
             <Button className="h-10 px-4 rounded-xl font-medium border-slate-300 text-slate-700 hover:border-slate-400">
               View All Tickets
@@ -121,7 +146,7 @@ export default function DashboardOverviewPage() {
               {stats?.total || 0}
             </span>
             <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-              Live Feed
+              All time
             </span>
           </div>
         </div>
@@ -178,7 +203,7 @@ export default function DashboardOverviewPage() {
               {stats?.byStatus?.RESOLVED || 0}
             </span>
             <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-              98% SLA met
+              Resolved tickets
             </span>
           </div>
         </div>
@@ -198,7 +223,7 @@ export default function DashboardOverviewPage() {
               {stats?.unassigned || 0} tickets
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Pending agent assignment
+              Without an assigned agent • all statuses
             </p>
           </div>
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
@@ -209,112 +234,132 @@ export default function DashboardOverviewPage() {
               {stats?.byPriority?.HIGH || 0} tickets
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Needs immediate attention
+              High priority • all statuses
             </p>
           </div>
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Closed Rate
+              Completed Share
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-2">94.2%</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">
+              {completedShare}
+            </p>
             <p className="text-xs text-slate-500 mt-1">
-              Based on monthly resolution
+              Resolved + closed / all accessible tickets
             </p>
           </div>
         </div>
       </div>
 
-      {/* Create Ticket Modal */}
-      <Modal
-        title={
-          <span className="text-lg font-bold text-slate-900">
-            Create New Support Ticket
-          </span>
-        }
+      <CreateTicketModal
         open={isModalOpen}
+        submitting={submitting}
+        form={form}
         onCancel={() => setIsModalOpen(false)}
-        footer={null}
-        destroyOnHidden
-        centered
-        className="rounded-2xl overflow-hidden"
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleCreateTicket}
-          initialValues={{ priority: "MEDIUM" }}
-          className="mt-4"
-        >
-          <Form.Item
-            label={
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Ticket Title
-              </span>
-            }
-            name="title"
-            rules={[
-              { required: true, message: "Please enter a ticket title" },
-              { max: 120, message: "Max 120 characters" },
-            ]}
-          >
-            <Input
-              placeholder="e.g., Unable to access billing invoices"
-              className="rounded-lg h-10 border-slate-300"
-            />
-          </Form.Item>
-
-          <Form.Item
-            label={
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Priority Level
-              </span>
-            }
-            name="priority"
-            rules={[{ required: true }]}
-          >
-            <Select className="h-10">
-              <Option value="LOW">Low Priority</Option>
-              <Option value="MEDIUM">Medium Priority</Option>
-              <Option value="HIGH">High Priority</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            label={
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Detailed Description
-              </span>
-            }
-            name="description"
-            rules={[
-              { required: true, message: "Please provide a description" },
-            ]}
-          >
-            <TextArea
-              rows={4}
-              placeholder="Describe the issue or request in detail..."
-              className="rounded-lg border-slate-300"
-            />
-          </Form.Item>
-
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
-            <Button
-              onClick={() => setIsModalOpen(false)}
-              className="rounded-lg"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={submitting}
-              className="bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm"
-            >
-              Submit Ticket
-            </Button>
-          </div>
-        </Form>
-      </Modal>
+        onFinish={handleCreateTicket}
+      />
     </div>
+  );
+}
+
+function CreateTicketModal({
+  open,
+  submitting,
+  form,
+  onCancel,
+  onFinish,
+}: {
+  open: boolean;
+  submitting: boolean;
+  form: import("antd").FormInstance<NewTicket>;
+  onCancel: () => void;
+  onFinish: (values: NewTicket) => Promise<void>;
+}) {
+  return (
+    <Modal
+      title={
+        <span className="text-lg font-bold text-slate-900">
+          Create New Support Ticket
+        </span>
+      }
+      open={open}
+      onCancel={onCancel}
+      footer={null}
+      forceRender
+      centered
+      className="rounded-2xl overflow-hidden"
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={onFinish}
+        initialValues={{ priority: "MEDIUM" }}
+        className="mt-4"
+      >
+        <Form.Item
+          label={
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+              Ticket Title
+            </span>
+          }
+          name="title"
+          rules={[
+            { required: true, message: "Please enter a ticket title" },
+            { max: 120, message: "Max 120 characters" },
+          ]}
+        >
+          <Input
+            placeholder="e.g., Unable to access billing invoices"
+            className="rounded-lg h-10 border-slate-300"
+          />
+        </Form.Item>
+
+        <Form.Item
+          label={
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+              Priority Level
+            </span>
+          }
+          name="priority"
+          rules={[{ required: true }]}
+        >
+          <Select className="h-10">
+            <Option value="LOW">Low Priority</Option>
+            <Option value="MEDIUM">Medium Priority</Option>
+            <Option value="HIGH">High Priority</Option>
+          </Select>
+        </Form.Item>
+
+        <Form.Item
+          label={
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+              Detailed Description
+            </span>
+          }
+          name="description"
+          rules={[{ required: true, message: "Please provide a description" }]}
+        >
+          <TextArea
+            rows={4}
+            placeholder="Describe the issue or request in detail..."
+            className="rounded-lg border-slate-300"
+          />
+        </Form.Item>
+
+        <div className="flex justify-end space-x-3 pt-4 border-t border-slate-100">
+          <Button onClick={onCancel} className="rounded-lg">
+            Cancel
+          </Button>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={submitting}
+            className="bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm"
+          >
+            Submit Ticket
+          </Button>
+        </div>
+      </Form>
+    </Modal>
   );
 }
