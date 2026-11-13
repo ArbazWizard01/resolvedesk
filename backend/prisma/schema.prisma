@@ -38,6 +38,7 @@ model User {
   createdTickets  Ticket[]   @relation("CreatedTickets")
   assignedTickets Ticket[]   @relation("AssignedTickets")
   comments        Comment[]
+  notifications   Notification[]
   activities      Activity[]
 }
 
@@ -55,6 +56,7 @@ model Ticket {
   assignedToId String?
   assignedTo   User?   @relation("AssignedTickets", fields: [assignedToId], references: [id])
 
+  notifications Notification[]
   comments   Comment[]
   activities Activity[]
 }
@@ -79,4 +81,27 @@ model Activity {
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   actorId  String
   actor    User   @relation(fields: [actorId], references: [id])
+}
+
+enum NotificationType {
+  TICKET_CREATED
+  COMMENT_ADDED
+  STATUS_CHANGED
+  AGENT_ASSIGNED
+}
+
+model Notification {
+  id          String @id @default(uuid())
+  type        NotificationType
+  title       String
+  message     String
+  createdAt   DateTime @default(now())
+  readAt      DateTime?
+  recipientId String
+  recipient   User @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  ticketId    String
+  ticket      Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
 }

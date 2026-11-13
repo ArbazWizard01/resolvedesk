@@ -1,4 +1,8 @@
 import {
+  recipients,
+  statusRecipients,
+} from '../notifications/notification-recipients';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -35,14 +39,33 @@ export class TicketsService {
     return { createdById: user.sub };
   }
 
-  create(user: JwtPayload, dto: CreateTicketDto) {
-    return this.prisma.ticket.create({
-      data: {
-        ...dto,
-        createdById: user.sub,
-        activities: { create: { action: 'Ticket created', actorId: user.sub } },
-      },
-      include: this.include,
+  async create(user: JwtPayload, dto: CreateTicketDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const admins = await tx.user.findMany({
+        where: { role: Role.ADMIN },
+        select: { id: true },
+      });
+      return tx.ticket.create({
+        data: {
+          ...dto,
+          createdById: user.sub,
+          activities: {
+            create: { action: 'Ticket created', actorId: user.sub },
+          },
+          notifications: {
+            create: recipients(
+              user.sub,
+              admins.map((a) => a.id),
+            ).map((recipientId) => ({
+              recipientId,
+              type: 'TICKET_CREATED' as const,
+              title: 'New ticket needs assignment',
+              message: `“${dto.title}” was created with ${dto.priority ?? 'MEDIUM'} priority.`,
+            })),
+          },
+        },
+        include: this.include,
+      });
     });
   }
 
@@ -92,23 +115,46 @@ export class TicketsService {
       );
     }
 
-    return this.prisma.ticket.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        activities: {
-          create: {
-            action: `Status changed from ${ticket.status} to ${dto.status}`,
-            actorId: user.sub,
+    if (ticket.status === dto.status) return ticket;
+    return this.prisma.$transaction(async (tx) => {
+      const admins = ['RESOLVED', 'CLOSED'].includes(dto.status)
+        ? await tx.user.findMany({
+            where: { role: Role.ADMIN },
+            select: { id: true },
+          })
+        : [];
+      return tx.ticket.update({
+        where: { id },
+        data: {
+          notifications: {
+            create: statusRecipients({
+              actorId: user.sub,
+              customerId: ticket.createdById,
+              assignedToId: ticket.assignedToId,
+              status: dto.status,
+              adminIds: admins.map((a) => a.id),
+            }).map((recipientId) => ({
+              recipientId,
+              type: 'STATUS_CHANGED' as const,
+              title: 'Ticket status updated',
+              message: `“${ticket.title}” changed from ${ticket.status.replaceAll('_', ' ')} to ${dto.status.replaceAll('_', ' ')}.`,
+            })),
+          },
+          status: dto.status,
+          activities: {
+            create: {
+              action: `Status changed from ${ticket.status} to ${dto.status}`,
+              actorId: user.sub,
+            },
           },
         },
-      },
-      include: this.include,
+        include: this.include,
+      });
     });
   }
 
   async assign(user: JwtPayload, id: string, dto: AssignTicketDto) {
-    await this.findOne(user, id);
+    const ticket = await this.findOne(user, id);
 
     const agent = await this.prisma.user.findUnique({
       where: { id: dto.assignedToId },
@@ -117,9 +163,28 @@ export class TicketsService {
       throw new BadRequestException('Assignee must be an existing agent');
     }
 
+    if (ticket.assignedToId === agent.id) return ticket;
     return this.prisma.ticket.update({
       where: { id },
       data: {
+        notifications: {
+          create: recipients(user.sub, [ticket.createdById, agent.id]).map(
+            (recipientId) => ({
+              recipientId,
+              type: 'AGENT_ASSIGNED' as const,
+              title:
+                recipientId === agent.id
+                  ? 'A ticket was assigned to you'
+                  : ticket.assignedToId
+                    ? 'Your ticket was reassigned'
+                    : 'Agent assigned',
+              message:
+                recipientId === agent.id
+                  ? `You are now responsible for “${ticket.title}”.`
+                  : `${agent.name} will handle “${ticket.title}”.`,
+            }),
+          ),
+        },
         assignedToId: agent.id,
         activities: {
           create: { action: `Assigned to ${agent.name}`, actorId: user.sub },
